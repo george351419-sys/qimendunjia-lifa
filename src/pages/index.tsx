@@ -102,7 +102,7 @@ export default function Home() {
                 type={params.type}
               />
 
-              <PanGrid result={result} showChangSheng={showChangSheng} />
+              <PanGrid result={result} showChangSheng={showChangSheng} itemType={params.type} />
 
               <div className="flex justify-center gap-3 flex-wrap">
                 <button

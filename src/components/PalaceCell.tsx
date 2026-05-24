@@ -1,16 +1,32 @@
 import React from 'react';
-import { QiMenResult, JIU_GONG, checkRuMu, checkJiXing, checkMenPo } from '../utils/qimen';
-import { getGanChangSheng } from '../utils/analysis';
+import { QiMenResult, checkRuMu, checkJiXing, checkMenPo } from '../utils/qimen';
+import { getGanChangSheng, ItemType } from '../utils/analysis';
 
 interface PalaceCellProps {
   palaceNum: string;
   result: QiMenResult;
   showChangSheng: boolean;
+  itemType: ItemType;
 }
 
-export const PalaceCell: React.FC<PalaceCellProps> = ({ palaceNum, result, showChangSheng }) => {
+const YONG_SHEN_MAP: Record<ItemType, string[]> = {
+  财运: ['生门'],
+  事业: ['开门'],
+  婚恋: ['六合'],
+  学习: ['天辅'],
+  考试: ['景门'],
+  健康: ['天芮'],
+  官非: ['白虎', '惊门'],
+};
+
+const normalizeStar = (star: string) => {
+  if (star.includes('天芮')) return '天芮';
+  if (star.includes('天禽')) return '天禽';
+  return star;
+};
+
+export const PalaceCell: React.FC<PalaceCellProps> = ({ palaceNum, result, showChangSheng, itemType }) => {
   const { tianPan, jiuXing, baMen, baShen, diPan, zhiFuGong, zhiFuXing, zhiShiGong, zhiShiMen, kongWangGong, maStar } = result;
-  const gongInfo = JIU_GONG[palaceNum as keyof typeof JIU_GONG];
   const shen = baShen[palaceNum];
   const men = baMen[palaceNum];
   let xing = jiuXing[palaceNum];
@@ -26,6 +42,8 @@ export const PalaceCell: React.FC<PalaceCellProps> = ({ palaceNum, result, showC
 
   const isKongWang = kongWangGong.includes(palaceNum);
   const isMaXing = palaceNum === maStar.gong;
+  const yongShenSymbols = YONG_SHEN_MAP[itemType] || [];
+  const isYongShen = yongShenSymbols.some(symbol => symbol === men || symbol === shen || symbol === normalizeStar(jiuXing[palaceNum] || ''));
   
   const isZhiFuXing = xing === zhiFuXing || xing === '芮禽' && zhiFuXing === '天芮';
   const isZhiShiMen = men === zhiShiMen;
@@ -96,8 +114,14 @@ export const PalaceCell: React.FC<PalaceCellProps> = ({ palaceNum, result, showC
 
       {/* 右上角：马星标识 */}
       {isMaXing && (
-        <div className="absolute top-1 right-1 w-8 h-8 flex items-center justify-center">
-          <img src="/horse.webp" alt="马星" className="w-7 h-7 object-contain mix-blend-multiply" />
+        <div className={`absolute ${isYongShen ? 'top-8' : 'top-1'} right-1 w-8 h-8 flex items-center justify-center`}>
+          <img src="/horse.png" alt="马星" className="w-7 h-7 object-contain" />
+        </div>
+      )}
+
+      {isYongShen && (
+        <div className="absolute top-1 right-1 h-6 min-w-6 px-1 rounded-sm bg-red-600 text-white text-xs font-bold flex items-center justify-center shadow-sm">
+          用
         </div>
       )}
 
@@ -118,9 +142,7 @@ export const PalaceCell: React.FC<PalaceCellProps> = ({ palaceNum, result, showC
       <div className="w-[3%]"></div>
 
       <div className="w-[34%] flex flex-col">
-        <div className="h-1/3 flex items-center justify-start">
-          <span className="text-sm text-gray-900">{gongInfo?.name}{palaceNum}</span>
-        </div>
+        <div className="h-1/3"></div>
         <div className="h-1/3 flex items-center justify-start">
           {isRuiQin && zhongGongTianGan && (
             <GanWithChangSheng gan={zhongGongTianGan} color={getZhongGongTianGanColor()} className="mr-1" />
