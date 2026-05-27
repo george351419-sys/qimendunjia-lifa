@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { InputPanel } from '../components/InputPanel';
 import { InfoPanel } from '../components/InfoPanel';
 import { PanGrid } from '../components/PanGrid';
 import { AnalysisPanel } from '../components/AnalysisPanel';
+import { FeedbackPanel } from '../components/FeedbackPanel';
+import { ScoringTabs } from '../components/ScoringTabs';
 import { analyzeQiMen, DetailedAnalysisResult, ItemType } from '../utils/analysis';
 import { calculateQiMen, QiMenResult } from '../utils/qimen';
+import { createRecord, FeedbackAccuracy, upsertRecord } from '../utils/records';
+import { DEFAULT_CUSTOM_WEIGHTS, FactorWeights, getDiLiRatio, getMethodWeights, ScoringMethod } from '../utils/scoring';
 
 interface InputParams {
   content: string;
@@ -36,18 +41,30 @@ export default function Home() {
   const [result, setResult] = useState<QiMenResult | null>(null);
   const [analysis, setAnalysis] = useState<DetailedAnalysisResult | null>(null);
   const [showChangSheng, setShowChangSheng] = useState(false);
+  const [showGeJu, setShowGeJu] = useState(false);
+  const [feedbackAccuracy, setFeedbackAccuracy] = useState<FeedbackAccuracy>('');
+  const [feedbackText, setFeedbackText] = useState('');
+  const [saveMessage, setSaveMessage] = useState('');
+  const [scoringMethod, setScoringMethod] = useState<ScoringMethod>('格局主导法');
+  const [customWeights, setCustomWeights] = useState<FactorWeights>(DEFAULT_CUSTOM_WEIGHTS);
 
   useEffect(() => {
     const now = new Date();
     setParams(p => ({ ...p, date: formatDateInput(now), time: formatTimeInput(now) }));
   }, []);
 
+  useEffect(() => {
+    if (!result) return;
+    setAnalysis(analyzeQiMen(result, params.type, scoringMethod, customWeights));
+  }, [result, params.type, scoringMethod, customWeights]);
+
   const handleSubmit = () => {
     try {
       const date = new Date(`${params.date}T${params.time}`);
       const qimenResult = calculateQiMen(date, { purpose: params.type });
       setResult(qimenResult);
-      setAnalysis(analyzeQiMen(qimenResult, params.type));
+      setAnalysis(analyzeQiMen(qimenResult, params.type, scoringMethod, customWeights));
+      setSaveMessage('');
     } catch (error) {
       console.error('排盘错误:', error);
       alert('排盘失败，请检查日期格式');
@@ -63,7 +80,8 @@ export default function Home() {
     setParams(p => ({ ...p, date: dateStr, time: timeStr }));
     const qimenResult = calculateQiMen(date, { purpose: params.type });
     setResult(qimenResult);
-    setAnalysis(analyzeQiMen(qimenResult, params.type));
+    setAnalysis(analyzeQiMen(qimenResult, params.type, scoringMethod, customWeights));
+    setSaveMessage('');
   };
 
   const handleNextHour = () => {
@@ -75,7 +93,35 @@ export default function Home() {
     setParams(p => ({ ...p, date: dateStr, time: timeStr }));
     const qimenResult = calculateQiMen(date, { purpose: params.type });
     setResult(qimenResult);
-    setAnalysis(analyzeQiMen(qimenResult, params.type));
+    setAnalysis(analyzeQiMen(qimenResult, params.type, scoringMethod, customWeights));
+    setSaveMessage('');
+  };
+
+  const handleSaveRecord = () => {
+    if (!result) return;
+    const record = createRecord(params, {
+      accuracy: feedbackAccuracy,
+      text: feedbackText,
+    });
+    upsertRecord(record);
+    setSaveMessage('已保存到历史记录。');
+  };
+
+  const handleReset = () => {
+    const now = new Date();
+    setParams({
+      content: '',
+      type: '财运',
+      date: formatDateInput(now),
+      time: formatTimeInput(now),
+    });
+    setResult(null);
+    setAnalysis(null);
+    setFeedbackAccuracy('');
+    setFeedbackText('');
+    setSaveMessage('');
+    setShowChangSheng(false);
+    setShowGeJu(false);
   };
 
   return (
@@ -85,6 +131,9 @@ export default function Home() {
           <h1 className="text-2xl font-bold" style={{ color: '#c94043', letterSpacing: '0.1em' }}>
             奇门遁甲排盘
           </h1>
+          <Link href="/history" className="inline-block mt-2 text-sm text-teal-700 hover:text-teal-900">
+            历史记录
+          </Link>
         </header>
 
         <div className="space-y-4">
@@ -102,7 +151,21 @@ export default function Home() {
                 type={params.type}
               />
 
-              <PanGrid result={result} showChangSheng={showChangSheng} itemType={params.type} />
+              <ScoringTabs
+                method={scoringMethod}
+                customWeights={customWeights}
+                onMethodChange={setScoringMethod}
+                onCustomWeightsChange={setCustomWeights}
+              />
+
+              <PanGrid
+                result={result}
+                showChangSheng={showChangSheng}
+                showGeJu={showGeJu}
+                itemType={params.type}
+                scoreWeights={getMethodWeights(scoringMethod, customWeights)}
+                diLiRatio={getDiLiRatio(scoringMethod)}
+              />
 
               <div className="flex justify-center gap-3 flex-wrap">
                 <button
@@ -110,6 +173,12 @@ export default function Home() {
                   className={`px-4 py-2 text-white rounded ${showChangSheng ? 'bg-amber-700 hover:bg-amber-800' : 'bg-teal-600 hover:bg-teal-700'}`}
                 >
                   长生状态
+                </button>
+                <button
+                  onClick={() => setShowGeJu(show => !show)}
+                  className={`px-4 py-2 text-white rounded ${showGeJu ? 'bg-amber-700 hover:bg-amber-800' : 'bg-teal-600 hover:bg-teal-700'}`}
+                >
+                  格局吉凶
                 </button>
                 <button
                   onClick={handlePrevHour}
@@ -130,7 +199,7 @@ export default function Home() {
                   <span style={{ color: '#00bcd4' }}>值符/使</span>
                 </div>
                 <div className="flex items-center gap-1 text-xs">
-                  <span style={{ color: '#9b7a30' }}>入墓</span>
+                  <span style={{ color: '#8a5a00' }}>入墓</span>
                 </div>
                 <div className="flex items-center gap-1 text-xs">
                   <span style={{ color: '#a855f7' }}>击刑</span>
@@ -144,6 +213,29 @@ export default function Home() {
               </div>
 
               {analysis && <AnalysisPanel analysis={analysis} />}
+
+              <FeedbackPanel
+                accuracy={feedbackAccuracy}
+                text={feedbackText}
+                onAccuracyChange={setFeedbackAccuracy}
+                onTextChange={setFeedbackText}
+              />
+
+              <div className="flex justify-center gap-3 flex-wrap pb-6">
+                <button
+                  onClick={handleSaveRecord}
+                  className="px-5 py-2 bg-teal-600 text-white rounded hover:bg-teal-700"
+                >
+                  保存记录
+                </button>
+                <button
+                  onClick={handleReset}
+                  className="px-5 py-2 bg-amber-600 text-white rounded hover:bg-amber-700"
+                >
+                  重新排盘
+                </button>
+                {saveMessage && <div className="w-full text-center text-sm text-teal-700">{saveMessage}</div>}
+              </div>
             </>
           )}
         </div>

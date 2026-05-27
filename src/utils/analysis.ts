@@ -1,7 +1,9 @@
 import { QiMenResult, checkJiXing, checkMenPo, checkRuMu } from './qimen';
+import { analyzeGeJu } from './geJu';
+import { FactorWeights, getDiLiRatio, getMethodWeights, redistributeWeights, ScoringMethod } from './scoring';
 
 export type ItemType = '财运' | '事业' | '婚恋' | '学习' | '考试' | '健康' | '官非';
-export type JiXiong = '大吉' | '平吉' | '吉' | '小吉' | '平' | '小凶' | '凶' | '大凶';
+export type JiXiong = '大吉' | '中吉' | '平吉' | '吉' | '小吉' | '中平' | '中性' | '中性偏凶' | '平' | '小凶' | '凶' | '大凶';
 
 export interface AnalysisRow {
   category: string;
@@ -9,6 +11,7 @@ export interface AnalysisRow {
   jiXiong: JiXiong;
   meaning: string;
   note: string;
+  score?: number;
 }
 
 export interface SubjectAnalysis {
@@ -29,18 +32,34 @@ export interface DetailedAnalysisResult {
     meaning: string;
     score: number;
     basis: string;
+    selectionText: string;
+    shengKe: {
+      conclusion: JiXiong;
+      relationship: string;
+      meaning: string;
+    };
+    finalJudgment: {
+      relationship: string;
+      stateText: string;
+      conclusion: JiXiong;
+      meaning: string;
+    };
   };
 }
 
-export const GAN_ROW_SCORE = 20;
-export const YONG_SHEN_ROW_SCORE = 25;
+export const GAN_ROW_SCORE = 100 / 6;
+export const YONG_SHEN_ROW_SCORE = 20;
 export const SPECIAL_NOTE_PENALTY = 20;
 
 export const RELATION_SCORE: Record<JiXiong, number> = {
   大吉: 90,
+  中吉: 80,
   平吉: 72,
   吉: 78,
   小吉: 66,
+  中平: 45,
+  中性: 55,
+  中性偏凶: 48,
   平: 55,
   小凶: 42,
   凶: 32,
@@ -81,6 +100,76 @@ const WUXING_SHENG: Record<string, string> = {
 
 const WUXING_KE: Record<string, string> = {
   木: '土', 土: '水', 水: '火', 火: '金', 金: '木',
+};
+
+const BRANCH_GONG: Record<string, string> = {
+  子: '1', 丑: '8', 寅: '8', 卯: '3',
+  辰: '4', 巳: '4', 午: '9', 未: '2',
+  申: '2', 酉: '7', 戌: '6', 亥: '6',
+};
+
+const OPPOSITE_GONG: Record<string, string> = {
+  '1': '9', '9': '1', '2': '8', '8': '2',
+  '3': '7', '7': '3', '4': '6', '6': '4', '5': '5',
+};
+
+const BRANCH_CLASH: Record<string, string> = {
+  子: '午', 午: '子', 丑: '未', 未: '丑',
+  寅: '申', 申: '寅', 卯: '酉', 酉: '卯',
+  辰: '戌', 戌: '辰', 巳: '亥', 亥: '巳',
+};
+
+const STAR_WUXING: Record<string, string> = {
+  天蓬: '水', 天任: '土', 天冲: '木', 天辅: '木', 天英: '火',
+  天芮: '土', 天禽: '土', 天柱: '金', 天心: '金',
+};
+
+const MEN_WUXING: Record<string, string> = {
+  休门: '水', 生门: '土', 伤门: '木', 杜门: '木',
+  景门: '火', 死门: '土', 惊门: '金', 开门: '金',
+};
+
+const SHEN_WUXING: Record<string, string> = {
+  值符: '土', 腾蛇: '火', 螣蛇: '火', 太阴: '金',
+  六合: '木', 白虎: '金', 玄武: '水', 九地: '土', 九天: '金',
+};
+
+const RU_MU_RESCUE: Record<string, { tomb: string; rescueZhi: string }> = {
+  甲: { tomb: '未', rescueZhi: '丑' },
+  乙: { tomb: '戌', rescueZhi: '辰' },
+  丙: { tomb: '戌', rescueZhi: '辰' },
+  戊: { tomb: '戌', rescueZhi: '辰' },
+  丁: { tomb: '丑', rescueZhi: '未' },
+  己: { tomb: '丑', rescueZhi: '未' },
+  庚: { tomb: '丑', rescueZhi: '未' },
+  辛: { tomb: '辰', rescueZhi: '戌' },
+  壬: { tomb: '辰', rescueZhi: '戌' },
+  癸: { tomb: '未', rescueZhi: '丑' },
+};
+
+const JI_XING_RESCUE: Record<string, { rescueZhi: string[]; rescueGan?: string; rescueWuxing: string }> = {
+  戊: { rescueZhi: ['戌', '丑'], rescueGan: '己', rescueWuxing: '火' },
+  己: { rescueZhi: ['卯', '午'], rescueGan: '丁', rescueWuxing: '金' },
+  庚: { rescueZhi: ['巳', '亥'], rescueGan: '己', rescueWuxing: '水' },
+  辛: { rescueZhi: ['未'], rescueGan: '乙', rescueWuxing: '土' },
+  壬: { rescueZhi: ['酉'], rescueWuxing: '金' },
+  癸: { rescueZhi: ['亥', '申'], rescueGan: '己', rescueWuxing: '水' },
+};
+
+const MEN_PO_RESCUE: Record<string, { rescueWuxing: string; rescueZhi: string; rescueGan?: string }> = {
+  '休门-9': { rescueWuxing: '木', rescueZhi: '丑' },
+  '生门-1': { rescueWuxing: '金', rescueZhi: '亥' },
+  '死门-1': { rescueWuxing: '金', rescueZhi: '巳' },
+  '伤门-2': { rescueWuxing: '火', rescueZhi: '戌', rescueGan: '己' },
+  '伤门-8': { rescueWuxing: '火', rescueZhi: '戌', rescueGan: '己' },
+  '杜门-2': { rescueWuxing: '火', rescueZhi: '申', rescueGan: '庚' },
+  '杜门-8': { rescueWuxing: '火', rescueZhi: '申', rescueGan: '庚' },
+  '景门-7': { rescueWuxing: '土', rescueZhi: '未' },
+  '景门-6': { rescueWuxing: '土', rescueZhi: '未' },
+  '开门-3': { rescueWuxing: '水', rescueZhi: '卯' },
+  '开门-4': { rescueWuxing: '水', rescueZhi: '卯' },
+  '惊门-3': { rescueWuxing: '水', rescueZhi: '卯' },
+  '惊门-4': { rescueWuxing: '水', rescueZhi: '卯' },
 };
 
 const GAN_JIXING_MEANING: Record<string, string> = {
@@ -315,11 +404,12 @@ function getRuiQinGong(result: QiMenResult): string {
   return Object.keys(result.jiuXing).find(gong => gong !== '5' && normalizeStar(result.jiuXing[gong]) === '天芮') || '2';
 }
 
-function findPalaceByGan(result: QiMenResult, gan: string): string {
+function findPalaceByGan(result: QiMenResult, gan: string, hiddenGan?: string): string {
+  const targetGan = gan === '甲' && hiddenGan ? hiddenGan : gan;
   const outerGongOrder = ['4', '9', '2', '3', '7', '8', '1', '6'];
-  const outerGong = outerGongOrder.find(gong => result.tianPan[gong] === gan);
+  const outerGong = outerGongOrder.find(gong => result.tianPan[gong] === targetGan);
   if (outerGong) return outerGong;
-  return result.tianPan['5'] === gan ? getRuiQinGong(result) : '';
+  return result.tianPan['5'] === targetGan ? getRuiQinGong(result) : '';
 }
 
 function findPalaceBySymbol(result: QiMenResult, symbols: string[]): { gong: string; symbol: string } {
@@ -340,8 +430,93 @@ function palaceLabel(gong: string): string {
 
 function scoreRow(jiXiong: JiXiong, maxScore: number): number {
   if (jiXiong.includes('吉')) return maxScore;
-  if (jiXiong === '平') return maxScore / 2;
+  if (jiXiong === '平' || jiXiong === '中性') return maxScore / 2;
+  if (jiXiong === '中性偏凶') return maxScore * 0.3;
   return 0;
+}
+
+function jiXiongByScore(score: number): JiXiong {
+  if (score >= 80) return '大吉';
+  if (score >= 65) return '吉';
+  if (score >= 50) return '平';
+  if (score >= 30) return '小凶';
+  return '凶';
+}
+
+type MonthState = '旺' | '相' | '休' | '囚' | '死';
+
+const MONTH_STATE_SCORE: Record<MonthState, number> = {
+  旺: 100,
+  相: 90,
+  休: 50,
+  囚: 30,
+  死: 0,
+};
+
+const MONTH_ZHI_WUXING: Record<string, string> = {
+  寅: '木', 卯: '木',
+  巳: '火', 午: '火',
+  申: '金', 酉: '金',
+  亥: '水', 子: '水',
+  辰: '土', 戌: '土', 丑: '土', 未: '土',
+};
+
+function monthState(monthWuxing: string, sourceWuxing: string): MonthState {
+  if (monthWuxing === sourceWuxing) return '旺';
+  if (WUXING_SHENG[monthWuxing] === sourceWuxing) return '相';
+  if (WUXING_SHENG[sourceWuxing] === monthWuxing) return '休';
+  if (WUXING_KE[monthWuxing] === sourceWuxing) return '死';
+  return '囚';
+}
+
+export function getDiLiByWuxing(
+  sourceWuxing: string,
+  gong: string,
+  monthZhi: string,
+  sourceName = '天干',
+  ratio = { palace: 0.5, month: 0.5 }
+) {
+  const palaceResult = elementPalaceJiXiong(sourceWuxing, gong, sourceName);
+  const palaceScore = scoreRow(palaceResult.jiXiong, 100);
+  const monthWuxing = MONTH_ZHI_WUXING[monthZhi] || '';
+
+  if (!monthWuxing || !sourceWuxing) {
+    const fallbackScore = palaceScore * ratio.palace + 50 * ratio.month;
+    return {
+      jiXiong: jiXiongByScore(fallbackScore),
+      score: fallbackScore,
+      meaning: `${palaceResult.meaning} 月令信息不足，月令部分暂以平论。`,
+      note: `宫位${Math.round(ratio.palace * 100)}%，月令${Math.round(ratio.month * 100)}%`,
+    };
+  }
+
+  const state = monthState(monthWuxing, sourceWuxing);
+  const stateScore = MONTH_STATE_SCORE[state];
+  const score = palaceScore * ratio.palace + stateScore * ratio.month;
+  const stateMeaningMap: Record<MonthState, string> = {
+    旺: `${sourceName}得月令同气，为旺。`,
+    相: `月令生${sourceName}，为相。`,
+    休: `${sourceName}生月令，为休。`,
+    囚: `${sourceName}克月令而受困，为囚。`,
+    死: `月令克${sourceName}，为死。`,
+  };
+
+  return {
+    jiXiong: jiXiongByScore(score),
+    score,
+    meaning: `${palaceResult.meaning} 月令${monthZhi}属${monthWuxing}，${stateMeaningMap[state]}`,
+    note: `宫位${Math.round(ratio.palace * 100)}%，月令${Math.round(ratio.month * 100)}%（${state}）`,
+  };
+}
+
+function rowFactor(category: string): keyof FactorWeights | '' {
+  if (category === '天时') return '天时';
+  if (category === '地利') return '地利';
+  if (category === '人和') return '人和';
+  if (category === '神助') return '神助';
+  if (category === '格局') return '格局';
+  if (category === '周期') return '周期';
+  return '';
 }
 
 export function getGanChangSheng(gan: string, gong: string): string {
@@ -350,6 +525,11 @@ export function getGanChangSheng(gan: string, gong: string): string {
   if (!branches || palaceBranches.length === 0) return '长生';
   const index = branches.findIndex(branch => palaceBranches.includes(branch));
   return CHANG_SHENG_ORDER[index >= 0 ? index : 0];
+}
+
+export function getGanChangShengJiXiong(gan: string, gong: string): JiXiong {
+  const changSheng = getGanChangSheng(gan, gong);
+  return CHANG_SHENG_MEANING[changSheng]?.jiXiong || '平';
 }
 
 function inferComboJiXiong(text: string): JiXiong {
@@ -394,22 +574,179 @@ function palaceJiXiong(gan: string, gong: string): { jiXiong: JiXiong; meaning: 
   return elementPalaceJiXiong(GAN_WUXING[gan], gong, '天干');
 }
 
+type FourHarmKind = '空亡' | '入墓' | '击刑' | '门破';
+type FourHarmStatus = '假空' | '半假空' | '真空' | '假墓' | '真墓' | '假击刑' | '真击刑' | '假门破' | '真门破';
+
+interface FourHarmItem {
+  kind: FourHarmKind;
+  status: FourHarmStatus;
+  coefficient: number;
+  severe: boolean;
+  note: string;
+}
+
+const FOUR_HARM_DANGER: Record<FourHarmKind, string> = {
+  空亡: '空亡代表“没有、落空”。吉事不吉，凶事不凶。如果问事，用神逢空亡，基本等于这件事“不存在”或“没结果”。',
+  入墓: '入墓代表“被困、无力”。就像一个人被关在地下室，他再有才华（吉格好）也发挥不出来。',
+  击刑: '击刑代表“破损、难受”。这是最严重的负面能量，代表事情内部有巨大的矛盾或伤害。',
+  门破: '门破代表“破坏、冲突”。人和环境的剧烈冲突，吉门被迫吉不就。',
+};
+
+const FOUR_HARM_COEFFICIENT: Record<FourHarmStatus, number> = {
+  假空: 1,
+  半假空: 0.5,
+  真空: 0.3,
+  假墓: 0.9,
+  真墓: 0.3,
+  假击刑: 0.6,
+  真击刑: 0.3,
+  假门破: 0.7,
+  真门破: 0.3,
+};
+
+function samePalaceGans(result: QiMenResult, gong: string, includeCenter = true): string[] {
+  const gans = [result.tianPan[gong], result.diPan[gong]];
+  if (includeCenter && gong !== '5' && normalizeStar(result.jiuXing[gong] || '') === '天芮') {
+    gans.push(result.tianPan['5'], result.diPan['5']);
+  }
+  return Array.from(new Set(gans.filter(Boolean)));
+}
+
+function samePalaceWuxing(result: QiMenResult, gong: string, excludeGan?: string): string[] {
+  const star = normalizeStar(result.jiuXing[gong] || '');
+  const values = [
+    STAR_WUXING[star],
+    MEN_WUXING[result.baMen[gong]],
+    SHEN_WUXING[result.baShen[gong]],
+    ...samePalaceGans(result, gong).filter(gan => gan !== excludeGan && !checkJiXing(gan, gong)).map(gan => GAN_WUXING[gan]),
+  ];
+  return values.filter(Boolean);
+}
+
+function hasTwoRescueWuxing(result: QiMenResult, gong: string, wuxing: string, excludeGan?: string) {
+  return samePalaceWuxing(result, gong, excludeGan).filter(item => item === wuxing).length >= 2;
+}
+
+function hasRescueGan(result: QiMenResult, gong: string, rescueGan?: string) {
+  if (!rescueGan) return false;
+  return [result.siZhu.day[0], result.siZhu.month[0], ...samePalaceGans(result, gong)].includes(rescueGan);
+}
+
+function hasRescueZhi(result: QiMenResult, rescueZhi: string | string[]) {
+  const options = Array.isArray(rescueZhi) ? rescueZhi : [rescueZhi];
+  return options.includes(result.siZhu.day[1]) || options.includes(result.siZhu.month[1]);
+}
+
+function buildHarmNote(base: string, kind: FourHarmKind, status: FourHarmStatus, reason: string) {
+  const truth = status.startsWith('真') ? `真${kind}` : status;
+  return `${base}但${reason}，因此是${truth}。${FOUR_HARM_DANGER[kind]}`;
+}
+
+export function analyzeFourHarms(result: QiMenResult, gong: string, focusGan?: string) {
+  const items: FourHarmItem[] = [];
+  const palaceGans = Array.from(new Set([...samePalaceGans(result, gong), focusGan].filter(Boolean)));
+
+  const kongBranches = result.kongWangZhi.filter(zhi => BRANCH_GONG[zhi] === gong);
+  if (kongBranches.length > 0) {
+    const maRescue = result.maStar.gong === gong || result.maStar.gong === OPPOSITE_GONG[gong];
+    const rescued = kongBranches.filter(zhi =>
+      maRescue
+      || result.siZhu.day[1] === zhi
+      || result.siZhu.month[1] === zhi
+      || result.siZhu.day[1] === BRANCH_CLASH[zhi]
+      || result.siZhu.month[1] === BRANCH_CLASH[zhi]
+    );
+    const status: FourHarmStatus = rescued.length === kongBranches.length ? '假空' : rescued.length > 0 ? '半假空' : '真空';
+    const reason = status === '真空'
+      ? '无日月地支、冲支或驿马解救'
+      : maRescue ? '本宫或对宫有驿马解救' : `日月地支解救${rescued.join('、')}`;
+    items.push({
+      kind: '空亡',
+      status,
+      coefficient: FOUR_HARM_COEFFICIENT[status],
+      severe: status === '真空' || status === '半假空',
+      note: buildHarmNote(`空亡${kongBranches.join('、')}。`, '空亡', status, reason),
+    });
+  }
+
+  for (const gan of palaceGans) {
+    if (gan && checkRuMu(gan, gong)) {
+      const rescue = RU_MU_RESCUE[gan];
+      const isFake = rescue ? hasRescueZhi(result, rescue.rescueZhi) : false;
+      const status: FourHarmStatus = isFake ? '假墓' : '真墓';
+      const base = `${gan}${GAN_WUXING[gan] || ''}入墓。代表关闭封藏，士气低迷，有心无力，百事不宜。`;
+      const reason = isFake ? `日支或月支有${rescue.rescueZhi}冲墓解救` : '无解救';
+      items.push({
+        kind: '入墓',
+        status,
+        coefficient: FOUR_HARM_COEFFICIENT[status],
+        severe: status === '真墓',
+        note: buildHarmNote(base, '入墓', status, reason),
+      });
+    }
+
+    if (gan && checkJiXing(gan, gong) && GAN_JIXING_MEANING[gan]) {
+      const rescue = JI_XING_RESCUE[gan];
+      const rescueByGan = hasRescueGan(result, gong, rescue?.rescueGan);
+      const rescueByZhi = rescue ? hasRescueZhi(result, rescue.rescueZhi) : false;
+      const rescueByWuxing = rescue ? hasTwoRescueWuxing(result, gong, rescue.rescueWuxing, gan) : false;
+      const isFake = rescueByGan || rescueByZhi || rescueByWuxing;
+      const status: FourHarmStatus = isFake ? '假击刑' : '真击刑';
+      const reasons = [
+        rescueByGan && `有${rescue?.rescueGan}天干解救`,
+        rescueByZhi && `日支或月支有${rescue?.rescueZhi.join('、')}解救`,
+        rescueByWuxing && `有两个以上${rescue?.rescueWuxing}五行通关`,
+      ].filter(Boolean);
+      const base = `${gan}${GAN_WUXING[gan] || ''}击刑。${GAN_JIXING_MEANING[gan]}`;
+      items.push({
+        kind: '击刑',
+        status,
+        coefficient: FOUR_HARM_COEFFICIENT[status],
+        severe: status === '真击刑',
+        note: buildHarmNote(base, '击刑', status, reasons.join('，') || '无解救'),
+      });
+    }
+  }
+
+  const men = result.baMen[gong];
+  if (men && checkMenPo(men, gong)) {
+    const rescue = MEN_PO_RESCUE[`${men}-${gong}`];
+    const rescueByGan = hasRescueGan(result, gong, rescue?.rescueGan);
+    const rescueByZhi = rescue ? hasRescueZhi(result, rescue.rescueZhi) : false;
+    const rescueByWuxing = rescue ? samePalaceWuxing(result, gong).filter(item => item === rescue.rescueWuxing).length >= 2 : false;
+    const isFake = rescueByGan || rescueByZhi || rescueByWuxing;
+    const status: FourHarmStatus = isFake ? '假门破' : '真门破';
+    const reasons = [
+      rescueByGan && `有${rescue?.rescueGan}天干解救`,
+      rescueByZhi && `日支或月支有${rescue?.rescueZhi}解救`,
+      rescueByWuxing && `有两个以上${rescue?.rescueWuxing}五行通关`,
+    ].filter(Boolean);
+    const base = MEN_PO_NOTE[men] || `${men}门破：事情有破损阻滞之象。`;
+    items.push({
+      kind: '门破',
+      status,
+      coefficient: FOUR_HARM_COEFFICIENT[status],
+      severe: status === '真门破',
+      note: buildHarmNote(base, '门破', status, reasons.join('，') || '无解救'),
+    });
+  }
+
+  const severeKinds = new Set(items.filter(item => item.severe).map(item => item.kind));
+  const multiplier = severeKinds.size >= 2
+    ? 0
+    : items.reduce((value, item) => value * item.coefficient, 1);
+
+  return {
+    items,
+    multiplier,
+    notes: items.map(item => item.note),
+  };
+}
+
 function specialNotes(result: QiMenResult, gong: string, gan: string): string[] {
   const notes: string[] = [];
-  const men = result.baMen[gong];
   const shen = result.baShen[gong];
-  const tianGan = result.tianPan[gong];
-  const diGan = result.diPan[gong];
-
-  for (const candidate of [tianGan, diGan].filter(Boolean)) {
-    if (checkRuMu(candidate, gong)) notes.push(`${candidate}${GAN_WUXING[candidate] || ''}入墓。代表关闭封藏，士气低迷，有心无力，百事不宜。`);
-    if (checkJiXing(candidate, gong) && GAN_JIXING_MEANING[candidate]) notes.push(`${candidate}${GAN_WUXING[candidate] || ''}击刑。${GAN_JIXING_MEANING[candidate]}`);
-  }
-  if (gan && gan !== tianGan && checkJiXing(gan, gong) && GAN_JIXING_MEANING[gan]) {
-    notes.push(`${gan}${GAN_WUXING[gan] || ''}击刑。${GAN_JIXING_MEANING[gan]}`);
-  }
-  if (men && checkMenPo(men, gong)) notes.push(MEN_PO_NOTE[men] || `${men}门破：事情有破损阻滞之象。`);
-  if (result.kongWangGong.includes(gong)) notes.push('空亡：信息不实，事物空无；犹如陆地上行舟，徒劳无功，使不上劲。');
+  notes.push(...analyzeFourHarms(result, gong, gan).notes);
   if (result.maStar.gong === gong) {
     const liuhe = shen === '六合' ? '若六合临马星，则又有分离、见面少之象。' : '';
     notes.push(`马星：主走动、外出、奔波、旅行、出差、搬家、转回职等与移动有关。${liuhe}`);
@@ -423,6 +760,8 @@ function buildSubject(
   title: string,
   gong: string,
   gan: string,
+  weights: FactorWeights,
+  diLiRatio: { palace: number; month: number },
   yongShenSymbol?: string
 ): SubjectAnalysis {
   if (!gong) {
@@ -433,9 +772,9 @@ function buildSubject(
   const men = result.baMen[gong] || '';
   const shen = result.baShen[gong] || '';
   const palace = PALACE_INFO[gong];
-  const palaceResult = yongShenSymbol
-    ? elementPalaceJiXiong(YONG_SHEN_WUXING[yongShenSymbol], gong, '用神')
-    : palaceJiXiong(gan || result.tianPan[gong], gong);
+  const diLiResult = yongShenSymbol
+    ? getDiLiByWuxing(YONG_SHEN_WUXING[yongShenSymbol], gong, result.siZhu.month[1], '用神', diLiRatio)
+    : getDiLiByWuxing(GAN_WUXING[gan || result.tianPan[gong]], gong, result.siZhu.month[1], '天干', diLiRatio);
   const changSheng = getGanChangSheng(gan || result.tianPan[gong], gong);
   const changShengScore = CHANG_SHENG_SCORE[ITEM_TO_SCORE_TYPE[itemType]][changSheng] ?? 0;
   const starInfo = comboRowInfo(yongShenSymbol, star, STAR_INFO[star] || { jiXiong: '平', meaning: '暂无解释。' });
@@ -449,7 +788,14 @@ function buildSubject(
     rows.push({ category: '天时', situation: `临${star}`, jiXiong: starInfo.jiXiong, meaning: starInfo.meaning, note: '无' });
   }
 
-  rows.push({ category: '地利', situation: `临${palace?.name || ''}宫`, jiXiong: palaceResult.jiXiong, meaning: palaceResult.meaning, note: '无' });
+  rows.push({
+    category: '地利',
+    situation: `临${palace?.name || ''}宫/月令${result.siZhu.month[1] || ''}`,
+    jiXiong: diLiResult.jiXiong,
+    meaning: diLiResult.meaning,
+    note: diLiResult.note,
+    score: diLiResult.score,
+  });
 
   if (skippedCategory !== '人和') {
     rows.push({ category: '人和', situation: `临${men}`, jiXiong: menInfo.jiXiong, meaning: menInfo.meaning, note: men && checkMenPo(men, gong) ? (MEN_PO_NOTE[men] || '门破，事情受阻。') : '无' });
@@ -461,10 +807,24 @@ function buildSubject(
 
   rows.push({ category: '周期', situation: `临${changSheng}`, jiXiong: CHANG_SHENG_MEANING[changSheng].jiXiong, meaning: CHANG_SHENG_MEANING[changSheng].meaning, note: `${changShengScore > 0 ? '+' : ''}${changShengScore}` });
 
+  const geJu = analyzeGeJu({ result, gong, itemType });
+  rows.push({
+    category: '格局',
+    situation: geJu.name,
+    jiXiong: geJu.finalJudgment,
+    meaning: geJu.explanation,
+    note: geJu.reason,
+  });
+
   const notes = specialNotes(result, gong, gan || result.tianPan[gong]);
-  const rowScore = yongShenSymbol ? YONG_SHEN_ROW_SCORE : GAN_ROW_SCORE;
-  const specialPenaltyCount = notes.filter(note => ['入墓', '击刑', '门破', '空亡'].some(keyword => note.includes(keyword))).length;
-  const score = Math.max(0, Math.min(100, rows.reduce((sum, row) => sum + scoreRow(row.jiXiong, rowScore), 0) - specialPenaltyCount * SPECIAL_NOTE_PENALTY));
+  const adjustedWeights = redistributeWeights(weights, skippedCategory || undefined);
+  const fourHarm = analyzeFourHarms(result, gong, gan || result.tianPan[gong]);
+  const baseScore = Math.min(100, rows.reduce((sum, row) => {
+    const factor = rowFactor(row.category);
+    return factor ? sum + (row.score ?? scoreRow(row.jiXiong, 100)) * adjustedWeights[factor] : sum;
+  }, 0));
+  const rawScore = baseScore * fourHarm.multiplier;
+  const score = Number(rawScore.toFixed(2));
 
   return {
     title,
@@ -497,17 +857,83 @@ function conclusionFor(itemType: ItemType, kind: ReturnType<typeof relationKind>
   return '大凶';
 }
 
-function buildRelation(result: QiMenResult, itemType: ItemType, dayGong: string, hourGong: string, yongGong: string, yongSymbol: string): DetailedAnalysisResult['relation'] {
+const RELATION_WANG_THRESHOLD = 40;
+
+type RelationKind = ReturnType<typeof relationKind>;
+type WangState = '旺' | '弱';
+
+const FINAL_RELATION_RULES: Record<RelationKind, Record<string, { conclusion: JiXiong; score: number; meaning: string }>> = {
+  生: {
+    '旺-旺': { conclusion: '大吉', score: 100, meaning: '名利双收，水到渠成。事情主动来找你，且自身实力足够，能轻松接住并享受成果。' },
+    '旺-弱': { conclusion: '小凶', score: 40, meaning: '富屋贫人，虚不受补。机会虽好，但你能力/运气不足，抓不住或无福消受，甚至因福致祸。' },
+    '弱-旺': { conclusion: '中平', score: 45, meaning: '有心无力，画饼充饥。你很想做且有能力，但对方（事/人）没实力或没诚意，最终难成大器。' },
+    '弱-弱': { conclusion: '大凶', score: 0, meaning: '互相拖累，同流合污。烂事碰到了倒霉人，不仅办不成，还可能一起陷入泥潭，甚至遭遇诈骗。' },
+  },
+  泄: {
+    '旺-旺': { conclusion: '中吉', score: 80, meaning: '主动投资，长线布局。适合主动出击、花钱办事或投资。目前虽累，但对方值得，未来有回报。' },
+    '旺-弱': { conclusion: '凶', score: 10, meaning: '打肿充胖，力不从心。自身实力不够却硬要透支去追求，导致元气大伤，最后把自己拖垮。' },
+    '弱-旺': { conclusion: '凶', score: 10, meaning: '肉包打狗，所托非人。你一片真心或投入重金，但对方是个无底洞或垃圾项目，有去无回。' },
+    '弱-弱': { conclusion: '大凶', score: 0, meaning: '自取灭亡，血本无归。盲目折腾，不仅达不到目的，还会耗尽最后一点精力或本金。' },
+  },
+  克出: {
+    '旺-旺': { conclusion: '中吉', score: 70, meaning: '劳碌致富，攻坚克难。事情有难度，但你能力强，只要肯下苦功夫、费周折，最终能拿下。' },
+    '旺-弱': { conclusion: '凶', score: 20, meaning: '以卵击石，反受其辱。想掌控局面但实力悬殊，不仅控制不了，反而会被事情反噬，惹麻烦上身。' },
+    '弱-旺': { conclusion: '小吉', score: 65, meaning: '大材小用，降维打击。杀鸡用牛刀，轻松拿捏。但可能因为目标太小，赚得也不多，食之无味。' },
+    '弱-弱': { conclusion: '凶', score: 35, meaning: '盲人摸象，白忙一场。双方都没实力，互相扯皮或纠缠不清，最后竹篮打水一场空。' },
+  },
+  克入: {
+    '旺-旺': { conclusion: '小凶', score: 40, meaning: '压力巨大，险中求胜。事情来势汹汹（如严厉领导、强劲对手），你虽能勉强扛住，但过程极度煎熬。' },
+    '旺-弱': { conclusion: '大凶', score: 0, meaning: '泰山压顶，灭顶之灾。彻底被环境或事情压垮。主破财、官非、重病或被对手彻底击溃。' },
+    '弱-旺': { conclusion: '小凶', score: 35, meaning: '阴沟翻船，小人作祟。虽然事情本身不大，但像苍蝇一样恶心你，甩不掉，让你心情极差。' },
+    '弱-弱': { conclusion: '凶', score: 5, meaning: '雪上加霜，祸不单行。本来就倒霉，还遇到烂事缠身。容易被小麻烦绊倒，运势极低。' },
+  },
+  同: {
+    '旺-旺': { conclusion: '大吉', score: 100, meaning: '强强联手，合作共赢。朋友、合伙人或环境与你同心同德，力量叠加，事半功倍。' },
+    '旺-弱': { conclusion: '平', score: 50, meaning: '寄人篱下，随波逐流。平台或对方很强，但你太弱，只能依附于人，没有话语权，分红也少。' },
+    '弱-旺': { conclusion: '小凶', score: 40, meaning: '遇人不淑，被猪拖累。你很有能力，但队友/环境太拉胯。在合作中你容易吃亏或被拖后腿。' },
+    '弱-弱': { conclusion: '平', score: 45, meaning: '难兄难弟，停滞不前。市场不景气或双方都没动力。事情处于僵持、拖延、毫无进展的状态。' },
+  },
+};
+
+const RELATION_LABELS: Record<RelationKind, string> = {
+  生: '用神生日干（事来找我，大吉）',
+  泄: '日干生用神（我去求事，泄气）',
+  克出: '日干克用神（我掌控事，辛苦）',
+  克入: '用神克日干（事来克我，压力）',
+  同: '日干与用神比和（同频共振，合作）',
+};
+
+function buildRelation(
+  result: QiMenResult,
+  itemType: ItemType,
+  dayGong: string,
+  hourGong: string,
+  yongGong: string,
+  yongSymbol: string,
+  dayScore: number,
+  hourScore: number,
+  yongScore: number
+): DetailedAnalysisResult['relation'] {
   const useHour = !yongGong || yongGong === dayGong;
   const targetGong = useHour ? hourGong : yongGong;
   const targetName = useHour ? '时干' : yongSymbol;
+  const targetScore = useHour ? hourScore : yongScore;
   const dayWx = PALACE_INFO[dayGong]?.wuxing;
   const targetWx = PALACE_INFO[targetGong]?.wuxing;
   if (!dayWx || !targetWx) {
-    return { conclusion: '平', wuxingRelation: '五行关系不足', meaning: '未能找到完整宫位五行，暂以平论。', score: 50, basis: '资料不足' };
+    return {
+      conclusion: '平',
+      wuxingRelation: '五行关系不足',
+      meaning: '未能找到完整宫位五行，暂以平论。',
+      score: 50,
+      basis: '资料不足',
+      selectionText: '用神或日干落宫资料不足，暂无法完整判断。',
+      shengKe: { conclusion: '平', relationship: '五行关系不足', meaning: '未能找到完整宫位五行，暂以平论。' },
+      finalJudgment: { relationship: '五行关系不足', stateText: '资料不足', conclusion: '平', meaning: '未能找到完整宫位五行，暂以平论。' },
+    };
   }
   const kind = relationKind(targetWx, dayWx);
-  const conclusion = conclusionFor(itemType, kind);
+  const shengKeConclusion = conclusionFor(itemType, kind);
   const text = RELATION_TEXT[itemType][kind];
   const relationTextMap = {
     生: `${targetName}生日干`,
@@ -516,27 +942,53 @@ function buildRelation(result: QiMenResult, itemType: ItemType, dayGong: string,
     克出: `日干克${targetName}`,
     克入: `${targetName}克日干`,
   };
+  const dayState: WangState = dayScore >= RELATION_WANG_THRESHOLD ? '旺' : '弱';
+  const targetState: WangState = targetScore >= RELATION_WANG_THRESHOLD ? '旺' : '弱';
+  const finalRule = FINAL_RELATION_RULES[kind][`${targetState}-${dayState}`];
+  const selectionText = useHour
+    ? `由于用神${yongSymbol}与日干同宫，因此直接选用时干分析。按时干与日干关系定吉凶。`
+    : `由于用神${yongSymbol}与日干不同宫，因此直接选用${yongSymbol}分析。按用神与日干关系定吉凶，并以时干辅助参考。`;
+  const stateText = `用神${targetState}（${targetScore}分） + 日干${dayState}（${dayScore}分）`;
+  const finalRelationship = RELATION_LABELS[kind].replaceAll('用神', targetName);
 
   return {
-    conclusion,
+    conclusion: finalRule.conclusion,
     wuxingRelation: relationTextMap[kind],
-    meaning: text,
-    score: RELATION_SCORE[conclusion],
-    basis: useHour ? '用神与日干同宫，按时干与日干关系定吉凶。' : '用神与日干不同宫，按用神与日干关系定吉凶，并以时干辅助参考。',
+    meaning: finalRule.meaning,
+    score: finalRule.score,
+    basis: selectionText,
+    selectionText,
+    shengKe: {
+      conclusion: shengKeConclusion,
+      relationship: relationTextMap[kind],
+      meaning: text,
+    },
+    finalJudgment: {
+      relationship: finalRelationship,
+      stateText,
+      conclusion: finalRule.conclusion,
+      meaning: finalRule.meaning,
+    },
   };
 }
 
-export function analyzeQiMen(result: QiMenResult, itemType: ItemType): DetailedAnalysisResult {
+export function analyzeQiMen(result: QiMenResult, itemType: ItemType, scoringMethod: ScoringMethod = '平均算法', customWeights?: FactorWeights): DetailedAnalysisResult {
   const dayGan = result.siZhu.day[0];
   const hourGan = result.siZhu.time[0];
-  const dayGong = findPalaceByGan(result, dayGan);
-  const hourGong = findPalaceByGan(result, hourGan);
+  const dayGong = findPalaceByGan(result, dayGan, result.dayXunShou);
+  const hourGong = findPalaceByGan(result, hourGan, result.xunShou);
   const yong = findPalaceBySymbol(result, YONG_SHEN_MAP[itemType]);
+  const weights = getMethodWeights(scoringMethod, customWeights);
+  const diLiRatio = getDiLiRatio(scoringMethod);
+
+  const riGan = buildSubject(result, itemType, `日干分析：日干为${dayGan}${GAN_WUXING[dayGan] || ''}`, dayGong, dayGan, weights, diLiRatio);
+  const shiGan = buildSubject(result, itemType, `时干分析：时干为${hourGan}${GAN_WUXING[hourGan] || ''}`, hourGong, hourGan, weights, diLiRatio);
+  const yongShen = buildSubject(result, itemType, `用神分析：取${YONG_SHEN_MAP[itemType].join('+')}为用神`, yong.gong, result.tianPan[yong.gong], weights, diLiRatio, yong.symbol);
 
   return {
-    riGan: buildSubject(result, itemType, `日干分析：日干为${dayGan}${GAN_WUXING[dayGan] || ''}`, dayGong, dayGan),
-    shiGan: buildSubject(result, itemType, `时干分析：时干为${hourGan}${GAN_WUXING[hourGan] || ''}`, hourGong, hourGan),
-    yongShen: buildSubject(result, itemType, `用神分析：取${YONG_SHEN_MAP[itemType].join('+')}为用神`, yong.gong, result.tianPan[yong.gong], yong.symbol),
-    relation: buildRelation(result, itemType, dayGong, hourGong, yong.gong, yong.symbol),
+    riGan,
+    shiGan,
+    yongShen,
+    relation: buildRelation(result, itemType, dayGong, hourGong, yong.gong, yong.symbol, riGan.score, shiGan.score, yongShen.score),
   };
 }

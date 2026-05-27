@@ -68,6 +68,7 @@ export interface QiMenResult {
   kongWangZhi: string[];
   kongWangGong: string[];
   maStar: { zhi: string; gong: string };
+  specialGe: string[];
   jiuGongAnalysis: Record<string, JiuGongInfo>;
   analysis: AnalysisResult;
 }
@@ -477,6 +478,49 @@ function getMaStar(lunar: any, method: string) {
   return { zhi: maZhi, gong: zhiToGong[maZhi] || '' };
 }
 
+function checkWuBuYuShi(dayGan: string, hourGan: string): boolean {
+  const hourKeDay: Record<string, string> = {
+    '甲': '庚',
+    '乙': '辛',
+    '丙': '壬',
+    '丁': '癸',
+    '戊': '甲',
+    '己': '乙',
+    '庚': '丙',
+    '辛': '丁',
+    '壬': '戊',
+    '癸': '己'
+  };
+  return hourKeDay[dayGan] === hourGan;
+}
+
+function getSpecialGe(siZhu: SiZhu, zhiFuYuanGong: string, zhiFuLuoGong: string): string[] {
+  const oppositeGong: Record<string, string> = {
+    '1': '9',
+    '9': '1',
+    '2': '8',
+    '8': '2',
+    '3': '7',
+    '7': '3',
+    '4': '6',
+    '6': '4',
+    '5': '5'
+  };
+  const result: string[] = [];
+
+  if (zhiFuLuoGong === zhiFuYuanGong) {
+    result.push('伏吟局');
+  } else if (oppositeGong[zhiFuYuanGong] === zhiFuLuoGong) {
+    result.push('反吟局');
+  }
+
+  if (checkWuBuYuShi(siZhu.day[0], siZhu.time[0])) {
+    result.push('五不遇时');
+  }
+
+  return result;
+}
+
 function distributeTianPan(diPan: any, xunShou: string, shiGan: string) {
   let zhiFuGong = findGanOnDiPan(diPan, xunShou);
   if (!zhiFuGong) zhiFuGong = '2';
@@ -711,6 +755,7 @@ export function calculateQiMen(date: Date, options?: { type?: string; method?: s
   const hourDiff = getHourDiff(lunar, opts.method);
   const baMenResult = distributeBaMen(jiuXingResult.zhiFuGong, hourDiff, juShu.type);
   const baShen = distributeBaShen(jiuXingResult.zhiFuLuoGong || jiuXingResult.zhiFuGong, juShu.type);
+  const specialGe = getSpecialGe(siZhu, jiuXingResult.zhiFuGong, jiuXingResult.zhiFuLuoGong || jiuXingResult.zhiFuGong);
 
   const jiuGongAnalysis: any = {};
   for (let i = 1; i <= 9; i++) {
@@ -751,6 +796,7 @@ export function calculateQiMen(date: Date, options?: { type?: string; method?: s
     kongWangZhi,
     kongWangGong,
     maStar,
+    specialGe,
     jiuGongAnalysis,
     analysis
   };
@@ -789,18 +835,14 @@ export const getMenPoColor = (menName: string, isMenPo: boolean, isZhiShi: boole
 
 // 入墓判断
 export const checkRuMu = (tianGan: string, gongNum: string): boolean => {
-  // 甲墓在未(坤宫2)，乙墓在戌(乾宫6)
-  // 丙墓在戌(乾宫6)，丁墓在丑(艮宫8)
-  // 戊墓在辰(巽宫4)，己墓在辰(巽宫4)
-  // 庚墓在丑(艮宫8)，辛墓在辰(巽宫4)
-  // 壬墓在辰(巽宫4)，癸墓在未(坤宫2)
+  // 按“新增六爻特殊事项计算法”中的入墓表判断。
   const ruMuMap: Record<string, string[]> = {
     '甲': ['2'],
     '乙': ['6'],
     '丙': ['6'],
     '丁': ['8'],
-    '戊': ['4'],
-    '己': ['4'],
+    '戊': ['6'],
+    '己': ['8'],
     '庚': ['8'],
     '辛': ['4'],
     '壬': ['4'],
@@ -863,4 +905,3 @@ export const checkMenPo = (menName: string, gongNum: string): boolean => {
   if (!mEl || !gEl) return false;
   return elementKe(mEl, gEl);
 };
-
