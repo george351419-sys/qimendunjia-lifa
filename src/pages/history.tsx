@@ -35,7 +35,7 @@ export default function HistoryPage() {
               {records.map(record => (
                 <Link
                   key={record.id}
-                  href={`/history/${record.id}`}
+                  href={`/history/detail?id=${record.id}`}
                   className="block w-full text-left p-3 rounded border bg-white/80 border-amber-100 hover:bg-amber-100 transition-colors"
                 >
                   <div className="flex items-center justify-between gap-3">

@@ -22,6 +22,7 @@ const METHODS: ScoringMethod[] = ['格局主导法', '天地人主导法', '地�
 
 export const ScoringTabs: React.FC<ScoringTabsProps> = ({ method, customWeights, onMethodChange, onCustomWeightsChange }) => {
   const [tip, setTip] = useState<{ title: string; text: string } | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const activeWeights = getMethodWeights(method, customWeights);
   const customTotal = SCORE_FACTORS.reduce((sum, factor) => sum + customWeights[factor], 0);
 
@@ -31,7 +32,15 @@ export const ScoringTabs: React.FC<ScoringTabsProps> = ({ method, customWeights,
   };
 
   return (
-    <section className="bg-amber-50 border border-amber-200 rounded-lg p-3 shadow-sm">
+    <section className="bg-amber-50 border border-amber-200 rounded-lg shadow-sm">
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100 rounded-lg transition-colors"
+      >
+        <span>评分算法：{method}</span>
+        <span className="text-amber-500">{expanded ? '▲ 收起' : '▼ 展开'}</span>
+      </button>
+      {expanded && <div className="px-3 pb-3 pt-1">
       <div className="grid grid-cols-3 gap-1 mb-3">
         {METHODS.map(item => (
           <button
@@ -102,6 +111,7 @@ export const ScoringTabs: React.FC<ScoringTabsProps> = ({ method, customWeights,
           </div>
         </div>
       )}
+      </div>}
     </section>
   );
 };
